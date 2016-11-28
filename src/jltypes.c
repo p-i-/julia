@@ -609,7 +609,7 @@ static int valid_type_param(jl_value_t *v)
 static int within_typevar(jl_value_t *t, jl_value_t *vlb, jl_value_t *vub)
 {
     jl_value_t *lb = t, *ub = t;
-    if (jl_is_typevar(t)) {
+    if (jl_is_typevar(t) || jl_has_free_typevars(t)) {
         // TODO: automatically restrict typevars in method definitions based on
         // types they are used in.
         return 1;
