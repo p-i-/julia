@@ -1598,10 +1598,8 @@ static int type_morespecific_(jl_value_t *a, jl_value_t *b, int invariant, jl_ty
         jl_value_t *tp0a = jl_tparam0(a);
         if (jl_is_typevar(tp0a)) {
             jl_value_t *ub = ((jl_tvar_t*)tp0a)->ub;
-            if (jl_isa(ub, b) &&
-                !jl_subtype((jl_value_t*)jl_any_type, ub)) {
+            if (!jl_subtype((jl_value_t*)jl_any_type, ub))
                 return 1;
-            }
         }
         else {
             if (jl_isa(tp0a, b))

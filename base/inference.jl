@@ -513,13 +513,11 @@ function getfield_tfunc(s00::ANY, name)
     s = s0 = unwrap_unionall(s00)
     if isType(s)
         p1 = s.parameters[1]
-        if isa(p1,UnionAll)
-            if isa(name,Const)
-                if name.val === :var
-                    return Const(p1.var)
-                elseif name.val === :body
-                    return Type{p1.body}
-                end
+        if isa(p1,UnionAll) && isa(name,Const)
+            if name.val === :var
+                return Const(p1.var)
+            elseif name.val === :body
+                return abstract_eval_constant(p1.body)
             end
         end
         s = typeof(p1)
@@ -530,10 +528,20 @@ function getfield_tfunc(s00::ANY, name)
         return rewrap_unionall(tmerge(getfield_tfunc(s.a, name), getfield_tfunc(s.b, name)),
                                s00)
     elseif isa(s,Const)
-        if isa(s.val, Module) && isa(name, Const) && isa(name.val, Symbol)
-            return abstract_eval_global(s.val, name.val)
+        sv = s.val
+        if isa(name,Const)
+            nv = name.val
+            if isa(sv, Module) && isa(nv, Symbol)
+                return abstract_eval_global(sv, nv)
+            end
+            if isa(sv,DataType) || isimmutable(sv)
+                try
+                    return abstract_eval_constant(getfield(sv, nv))
+                catch
+                end
+            end
         end
-        s = typeof(s.val)
+        s = typeof(sv)
     end
     if !isa(s,DataType) || s.abstract
         return Any
@@ -611,6 +619,8 @@ function fieldtype_tfunc(s::ANY, name::ANY)
     t = getfield_tfunc(s, name)
     if t === Bottom
         return t
+    elseif isa(t,Const)
+        return Type{typeof(t.val)}
     elseif isleaftype(t) || isvarargtype(t)
         return Type{t}
     end
@@ -1084,7 +1094,7 @@ function pure_eval_call(f::ANY, argtypes::ANY, atype::ANY, vtypes::VarTable, sv:
                 elseif isleaftype(rt) || isleaftype(af_argtype) || rt === Bottom
                     return Type{rt}
                 else
-                    return Type{TypeVar(:R, rt)}
+                    return Type{R} where R<:rt
                 end
             end
         end
@@ -1157,9 +1167,16 @@ function abstract_call(f::ANY, fargs, argtypes::Vector{Any}, vtypes::VarTable, s
         end
         return Any
     elseif f === UnionAll
-        if length(fargs) == 3 && isa(argtypes[2],Const) && isType(argtypes[3])
+        if length(fargs) == 3 && isa(argtypes[2],Const)
+            if isType(argtypes[3])
+                body = argtypes[3].parameters[1]
+            elseif isa(argtypes[3],Const)
+                body = argtypes[3].val
+            else
+                return Any
+            end
             try
-                return Type{UnionAll(argtypes[2].val, argtypes[3].parameters[1])}
+                return abstract_eval_constant(UnionAll(argtypes[2].val, body))
             catch
             end
         end
@@ -1176,10 +1193,10 @@ function abstract_call(f::ANY, fargs, argtypes::Vector{Any}, vtypes::VarTable, s
             if istopfunction(tm, f, :getindex)
                 return getfield_tfunc(argtypes[2], argtypes[3])
             elseif istopfunction(tm, f, :next)
-                t1 = getfield_tfunc(argtypes[2], argtypes[3])
+                t1 = widenconst(getfield_tfunc(argtypes[2], argtypes[3]))
                 return t1===Bottom ? Bottom : Tuple{t1, Int}
             elseif istopfunction(tm, f, :indexed_next)
-                t1 = getfield_tfunc(argtypes[2], argtypes[3])
+                t1 = widenconst(getfield_tfunc(argtypes[2], argtypes[3]))
                 return t1===Bottom ? Bottom : Tuple{t1, Int}
             end
         end
@@ -1317,8 +1334,9 @@ function abstract_eval_constant(x::ANY)
     if isa(x,Type)
         if x === Array
             return Type_Array
+        elseif !has_free_typevars(x)
+            return Type{x}
         end
-        return Type{x}
     end
     return Const(x)
 end
